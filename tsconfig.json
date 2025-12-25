@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2019",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "strict": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "typeRoots": ["./src/@types"],
+    "paths": {
+      // Base paths to look for modules.
+      "@/src/*": ["src/*"],
+      "@/bot/*": ["src/modules/bot/*"],
+      "@/types/*": ["src/@types/*"],
+      "@/common/*": ["src/common/*"],
+      "@/authentication/*": ["src/authentication/*"],
+      "@/dauthentication/*": ["src/authentication/*"],
+      "@/config/*": ["src/config/*"],
+      "@/database/*": ["src/database/*"],
+      "@/jobs/*": ["src/jobs/*"],
+      "@/mails/*": ["src/mails/*"],
+      "@/modules/*": ["src/modules/*"],
+      "@/providers/*": ["src/providers/*"],
+      "@/web3Modules/*": ["src/web3Modules/*"],
+      "@/dweb3Modules/*": ["src/web3Modules/*"],
+      
+      // for example, if you have a `services` directory in `src`
+      // You can add more paths and aliases as you like.
+    }
+  }
+}
