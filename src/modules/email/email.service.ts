@@ -6,10 +6,10 @@ import { simpleParser } from 'mailparser';
 export class EmailService {
   private readonly imapConfig = {
     user: 'samiulalim01234@gmail.com',
-    password: 'vnsh lino mwes ahqc', // Your Gmail App Password
+    password: 'vnsh lino mwes ahqc',
     host: 'imap.gmail.com',
     port: 993,
-    tls: true,  // Use TLS for secure connection
+    tls: true, 
   };
 
   private listenerConnection: any;
@@ -41,7 +41,7 @@ export class EmailService {
 
 
 
-  // Updated getEmails method
+ 
   async getEmails(folder: string) {
     const connection = await this.connectFetcher();
 
