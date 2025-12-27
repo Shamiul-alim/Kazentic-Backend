@@ -9,9 +9,10 @@ import { AuthService } from "@/modules/auth/auth.service";
 import { AuthDto } from "@/modules/auth/dto";
 import { ValidationPipe } from "@/common/pipes/validation.pipe";
 
+
 @Controller("auth")
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @HttpCode(HttpStatus.OK)
   @Post("login")

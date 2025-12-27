@@ -57,7 +57,7 @@ pnpm migration:run
 # Database
 ```bash
 -DB_CLIENT=pg
--DB_DATABASE=event_buddy
+-DB_DATABASE=postgres
 -DB_USER=postgres
 -DB_PASSWORD=your_password
 -DB_HOST=localhost

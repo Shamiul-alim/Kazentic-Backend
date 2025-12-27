@@ -14,14 +14,10 @@ import { EmailModule } from "./modules/email/email.module";
     PostgresDatabaseProviderModule,
     ConfigModule.forRoot({
       isGlobal: true,
-    }),
-  
-    ConfigModule.forRoot({
-      isGlobal: true,
       load: [global_config],
     }),
   ],
   controllers: [],
   providers: [],
 })
-export class AppModule {}
+export class AppModule { }
