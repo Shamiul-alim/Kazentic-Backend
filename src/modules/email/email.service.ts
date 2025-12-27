@@ -1,103 +1,131 @@
-import { Injectable } from '@nestjs/common';
-import * as Imap from 'node-imap';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import * as ImapNamespace from 'node-imap';
+const Imap = require('node-imap');
 import { simpleParser } from 'mailparser';
 
+type ImapInstance = any;
+
 @Injectable()
-export class EmailService {
+export class EmailService implements OnModuleDestroy {
   private readonly imapConfig = {
-    user: 'samiulalim01234@gmail.com',
-    password: 'vnsh lino mwes ahqc',
+    user: process.env.user || '',
+    password: process.env.password || '',
     host: 'imap.gmail.com',
     port: 993,
-    tls: true, 
+    tls: true,
+    tlsOptions: { rejectUnauthorized: false },
+    authTimeout: 10000,
   };
 
-  private listenerConnection: any;
-  private fetchConnection: any;
+  private listenerConnection: ImapInstance | null = null;
 
-  async connectListener() {
-    if (!this.listenerConnection) {
-      this.listenerConnection = new Imap(this.imapConfig);
-
-      this.listenerConnection.once('ready', () => {
-        console.log('IMAP listener ready');
-        this.listenerConnection.openBox('INBOX', false, (err: any) => {
-          if (err) console.error(err);
-        });
-      });
-
-      this.listenerConnection.connect();
-    }
-
-    return this.listenerConnection;
-  }
-  async connectFetcher() {
-    if (!this.fetchConnection) {
-      this.fetchConnection = new Imap(this.imapConfig);
-      this.fetchConnection.connect();
-    }
-    return this.fetchConnection;
+  onModuleDestroy() {
+    if (this.listenerConnection) this.listenerConnection.end();
   }
 
+  async connectFetcher(): Promise<ImapInstance> {
 
+    const conn = new Imap(this.imapConfig);
+    return new Promise((resolve, reject) => {
+      conn.once('ready', () => resolve(conn));
+      conn.once('error', (err: any) => reject(err));
+      conn.connect();
+    });
+  }
 
- 
-  async getEmails(folder: string) {
+  async getEmails(folder: string, limit: number = 10, lastUid?: number): Promise<any[]> {
     const connection = await this.connectFetcher();
 
-
-
     return new Promise<any[]>((resolve, reject) => {
-      connection.openBox(folder, false, (err: any, box: any) => {
+      connection.openBox(folder, true, (err: any, box: any) => {
         if (err) {
-          console.error('Error opening folder:', err);
-          reject('Unable to open folder');
+          connection.end();
+          return reject(err);
         }
 
-        const messages: any[] = [];
-        const searchCriteria =
-          folder === '[Gmail]/Drafts'
-            ? ['DRAFT']
-            : folder === '[Gmail]/Starred'
-              ? ['FLAGGED']
-              : ['ALL'];
 
-        connection.search(searchCriteria, (err: any, results: any) => {
-          if (err) return reject(err);
-          if (!results || results.length === 0) {
-            console.log(`No emails found in ${folder}`);
+        connection.search(['ALL'], (err: any, uids: number[]) => {
+          if (err) {
+            connection.end();
+            return reject(err);
+          }
+
+
+          const targetUids = uids.sort((a, b) => b - a).slice(0, limit);
+
+          if (targetUids.length === 0) {
+            connection.end();
             return resolve([]);
           }
 
-          const fetch = connection.fetch(results, {
-            bodies: '',
-            struct: true,
-          });
-          let emailCounter = 1;
+          const messagePromises: Promise<any>[] = [];
 
-          fetch.on('message', (msg: any) => {
-            const uniqueId = emailCounter++;
-            msg.on('body', (stream: any) => {
-              simpleParser(stream)
-                .then((parsed: { from: { text: any; }; subject: any; date: any; text: any; }) => {
-                  messages.push({
-                    id: uniqueId,
-                    from: parsed.from?.text ?? '(Draft)',
-                    subject: parsed.subject ?? '(No Subject)',
-                    date: parsed.date ?? null,
-                    text: parsed.text ?? '',
-                    isDraft: folder === '[Gmail]/Drafts',
+          const f = connection.fetch(targetUids, { bodies: '' });
+
+          f.on('message', (msg: any) => {
+            const p = new Promise((res) => {
+              let attributes: any;
+              let fullParsed: any;
+
+              const attemptResolve = () => {
+                if (attributes && fullParsed) {
+                  res({
+                    uid: attributes.uid,
+                    from: fullParsed.from?.text ?? '(No Sender)',
+                    subject: fullParsed.subject ?? '(No Subject)',
+                    date: fullParsed.date,
+                    textSnippet: fullParsed.text?.substring(0, 200) ?? '',
+                    isDraft: folder.includes('Drafts'),
                   });
-                })
-                .catch(console.error);
+                }
+              };
+
+              msg.on('attributes', (attrs: any) => {
+                attributes = attrs;
+                attemptResolve();
+              });
+
+              msg.on('body', (stream: any) => {
+                simpleParser(stream).then((parsed: any) => {
+                  fullParsed = parsed;
+                  attemptResolve();
+                });
+              });
             });
+            messagePromises.push(p);
           });
 
+          f.once('error', (err: any) => {
+            connection.end();
+            reject(err);
+          });
 
-          fetch.once('end', () => resolve(messages));
+          f.once('end', async () => {
+            connection.end();
+            const results = await Promise.all(messagePromises);
+
+            resolve(results.sort((a, b) => b.uid - a.uid));
+          });
         });
       });
     });
   }
 
+  async connectListener(): Promise<ImapInstance> {
+    if (!this.listenerConnection) {
+      this.listenerConnection = new Imap(this.imapConfig);
+      return new Promise((resolve, reject) => {
+        this.listenerConnection!.once('ready', () => {
+          this.listenerConnection!.openBox('INBOX', false, (err: any) => {
+            if (err) return reject(err);
+            console.log('IMAP listener ready and watching INBOX');
+            resolve(this.listenerConnection!);
+          });
+        });
+        this.listenerConnection!.once('error', (err: any) => reject(err));
+        this.listenerConnection!.connect();
+      });
+    }
+    return this.listenerConnection;
+  }
 }

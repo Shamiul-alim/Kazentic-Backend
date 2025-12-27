@@ -11,6 +11,8 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "strict": true,
+    "esModuleInterop": true,
+    "moduleResolution": "node",
     "incremental": true,
     "skipLibCheck": true,
     "typeRoots": ["./src/@types"],
@@ -31,8 +33,7 @@
       "@/web3Modules/*": ["src/web3Modules/*"],
       "@/dweb3Modules/*": ["src/web3Modules/*"],
       
-      // for example, if you have a `services` directory in `src`
-      // You can add more paths and aliases as you like.
+      
     }
   }
 }

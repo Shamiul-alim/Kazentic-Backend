@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { EmailService } from './email.service';
 
 @Controller('emails')
@@ -6,7 +6,7 @@ export class EmailController {
   constructor(private readonly emailService: EmailService) { }
 
   @Get(':folder')
-  async getEmails(@Param('folder') folder: string) {
+  async getEmails(@Param('folder') folder: string, @Query('lastFetchedEmailId') lastFetchedEmailId: string,) {
     const folderMap: Record<string, string> = {
       inbox: 'INBOX',
       sent: '[Gmail]/Sent Mail',
@@ -25,9 +25,12 @@ export class EmailController {
         message: 'Invalid folder name',
       };
     }
+    const lastFetchedEmailIdNumber = lastFetchedEmailId
+      ? parseInt(lastFetchedEmailId, 10)
+      : 0;
 
     try {
-      const emails = await this.emailService.getEmails(imapFolder);
+      const emails = await this.emailService.getEmails(imapFolder, 10, lastFetchedEmailIdNumber);
       return { success: true, emails };
     } catch (error) {
       return {
