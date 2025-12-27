@@ -1,13 +1,20 @@
 import { WebSocketGateway, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, MessageBody, WebSocketServer } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { EmailService } from './email.service';
+import { OnModuleInit } from '@nestjs/common';
 
-@WebSocketGateway()
-export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
+
+@WebSocketGateway({ cors: true })
+export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
     @WebSocketServer()
     server!: Server;
 
     constructor(private readonly emailService: EmailService) { }
+
+    async onModuleInit() {
+        console.log('Starting IMAP mail listener...');
+        await this.listenForNewEmails();
+    }
 
     async handleConnection(client: Socket) {
         console.log('Client connected: ' + client.id);
@@ -25,9 +32,10 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
 
     async listenForNewEmails() {
-        const connection = await this.emailService.connect();
+        const connection = await this.emailService.connectListener();
         connection.on('mail', async () => {
-            const emails = await this.emailService.getEmails('inbox');
+            console.log('New email detected');
+            const emails = await this.emailService.getEmails('INBOX');
             this.server.emit('emails', emails);
         });
     }

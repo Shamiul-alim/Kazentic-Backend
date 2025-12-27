@@ -7,13 +7,34 @@ export class EmailController {
 
   @Get(':folder')
   async getEmails(@Param('folder') folder: string) {
+    const folderMap: Record<string, string> = {
+      inbox: 'INBOX',
+      sent: '[Gmail]/Sent Mail',
+      spam: '[Gmail]/Spam',
+      trash: '[Gmail]/Trash',
+      drafts: '[Gmail]/Drafts',
+      all: '[Gmail]/All Mail',
+      starred: '[Gmail]/Starred',
+    };
+
+    const imapFolder = folderMap[folder.toLowerCase()];
+
+    if (!imapFolder) {
+      return {
+        success: false,
+        message: 'Invalid folder name',
+      };
+    }
+
     try {
-      const emails = await this.emailService.getEmails(folder);
+      const emails = await this.emailService.getEmails(imapFolder);
       return { success: true, emails };
     } catch (error) {
-      console.error('Error fetching emails:', error);
-      const message = error instanceof Error ? error.message : 'An unknown error occurred';
-      return { success: false, message };
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
+
 }

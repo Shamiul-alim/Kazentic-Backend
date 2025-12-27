@@ -12,26 +12,39 @@ export class EmailService {
     tls: true,  // Use TLS for secure connection
   };
 
-  private connection: any;
+  private listenerConnection: any;
+  private fetchConnection: any;
 
-  public async connect() {
-    if (!this.connection) {
-      console.log('Connecting to IMAP server...');
-      try {
-        this.connection = new Imap(this.imapConfig);
-        this.connection.connect();  // Connect to IMAP server
-        console.log('Connected to IMAP server');
-      } catch (error) {
-        console.error('Error connecting to IMAP server:', error);
-        throw new Error('IMAP connection failed');
-      }
+  async connectListener() {
+    if (!this.listenerConnection) {
+      this.listenerConnection = new Imap(this.imapConfig);
+
+      this.listenerConnection.once('ready', () => {
+        console.log('IMAP listener ready');
+        this.listenerConnection.openBox('INBOX', false, (err: any) => {
+          if (err) console.error(err);
+        });
+      });
+
+      this.listenerConnection.connect();
     }
-    return this.connection;
+
+    return this.listenerConnection;
   }
+  async connectFetcher() {
+    if (!this.fetchConnection) {
+      this.fetchConnection = new Imap(this.imapConfig);
+      this.fetchConnection.connect();
+    }
+    return this.fetchConnection;
+  }
+
+
 
   // Updated getEmails method
   async getEmails(folder: string) {
-    const connection = await this.connect();
+    const connection = await this.connectFetcher();
+
 
 
     return new Promise<any[]>((resolve, reject) => {
@@ -42,49 +55,45 @@ export class EmailService {
         }
 
         const messages: any[] = [];
-        connection.search(['ALL'], (err: any, results: any) => {
-          if (err) {
-            console.error('Error searching messages:', err);
-            reject('Unable to search messages');
+        const searchCriteria =
+          folder === '[Gmail]/Drafts'
+            ? ['DRAFT']
+            : folder === '[Gmail]/Starred'
+              ? ['FLAGGED']
+              : ['ALL'];
+
+        connection.search(searchCriteria, (err: any, results: any) => {
+          if (err) return reject(err);
+          if (!results || results.length === 0) {
+            console.log(`No emails found in ${folder}`);
+            return resolve([]);
           }
 
           const fetch = connection.fetch(results, {
-            bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)'],
+            bodies: '',
             struct: true,
           });
 
           fetch.on('message', (msg: any) => {
-            const email: any = {};
             msg.on('body', (stream: any) => {
-              simpleParser(stream).then((parsed: any) => {
-                email['from'] = parsed.from.text;
-                email['subject'] = parsed.subject;
-                email['date'] = parsed.date;
-                email['text'] = parsed.text;
-                messages.push(email);
-              }).catch((error: any) => {
-                console.error('Error parsing email:', error);
-              });
+              simpleParser(stream)
+                .then((parsed: { from: { text: any; }; subject: any; date: any; text: any; }) => {
+                  messages.push({
+                    from: parsed.from?.text ?? '(Draft)',
+                    subject: parsed.subject ?? '(No Subject)',
+                    date: parsed.date ?? null,
+                    text: parsed.text ?? '',
+                    isDraft: folder === '[Gmail]/Drafts',
+                  });
+                })
+                .catch(console.error);
             });
           });
 
-          fetch.once('end', () => {
-            console.log('Fetched messages:', messages);
-            resolve(messages);  // Resolve the promise with the fetched emails
-          });
+          fetch.once('end', () => resolve(messages));
         });
       });
     });
   }
 
-  // Listen for new emails
-  async listenForNewEmails() {
-    const connection = await this.connect();
-    connection.on('mail', async () => {
-      console.log('New email received');
-      const emails = await this.getEmails('inbox');
-      // Do something with the new emails
-      console.log(emails);  // Just logging emails here for now
-    });
-  }
 }
