@@ -88,6 +88,3 @@ pnpm start:dev
 
 -Database & ORM: typeorm, pg (PostgreSQL), class-transformer, class-validator
 
--Utilities: lodash, moment, uuid
-
--File Uploads & Processing: multer, sharp

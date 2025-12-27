@@ -73,12 +73,15 @@ export class EmailService {
             bodies: '',
             struct: true,
           });
+          let emailCounter = 1;
 
           fetch.on('message', (msg: any) => {
+            const uniqueId = emailCounter++;
             msg.on('body', (stream: any) => {
               simpleParser(stream)
                 .then((parsed: { from: { text: any; }; subject: any; date: any; text: any; }) => {
                   messages.push({
+                    id: uniqueId,
                     from: parsed.from?.text ?? '(Draft)',
                     subject: parsed.subject ?? '(No Subject)',
                     date: parsed.date ?? null,
@@ -89,6 +92,7 @@ export class EmailService {
                 .catch(console.error);
             });
           });
+
 
           fetch.once('end', () => resolve(messages));
         });
