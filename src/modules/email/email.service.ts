@@ -7,6 +7,7 @@ type ImapInstance = any;
 
 @Injectable()
 export class EmailService implements OnModuleDestroy {
+
   private readonly imapConfig = {
     user: process.env.user || '',
     password: process.env.password || '',
@@ -16,42 +17,46 @@ export class EmailService implements OnModuleDestroy {
     tlsOptions: { rejectUnauthorized: false },
     authTimeout: 10000,
   };
+
   private listenerConnection: Map<string, ImapInstance> = new Map();
+  private fetcherConn: ImapInstance | null = null;
 
   onModuleDestroy() {
-    // Close all active listener connections
     this.listenerConnection.forEach((conn) => conn.end());
     this.listenerConnection.clear();
   }
-  async connectFetcher(): Promise<ImapInstance> {
+
+  async getFetcherConnection(): Promise<ImapInstance> {
+    if (this.fetcherConn && this.fetcherConn.state !== 'disconnected') {
+      return this.fetcherConn;
+    }
+
     const conn = new Imap(this.imapConfig);
-    return new Promise((resolve, reject) => {
+    this.fetcherConn = await new Promise((resolve, reject) => {
       conn.once('ready', () => resolve(conn));
-      conn.once('error', (err: any) => reject(err));
+      conn.once('error', reject);
       conn.connect();
     });
+    return this.fetcherConn;
   }
 
-  async getEmails(folder: string, limit: number = 10, lastUid?: number): Promise<any[]> {
-    const connection = await this.connectFetcher();
+  async getEmails(folder: string, limit: number = 10): Promise<any[]> {
+    const connection = await this.getFetcherConnection();
 
-    return new Promise<any[]>((resolve, reject) => {
-      connection.openBox(folder, true, (err: any, box: any) => {
+    return new Promise((resolve, reject) => {
+      connection.openBox(folder, true, (err: any) => {
         if (err) {
-          connection.end();
           return reject(err);
         }
 
         connection.search(['ALL'], (err: any, uids: number[]) => {
           if (err) {
-            connection.end();
             return reject(err);
           }
 
           const targetUids = uids.sort((a, b) => b - a).slice(0, limit);
 
           if (targetUids.length === 0) {
-            connection.end();
             return resolve([]);
           }
 
@@ -91,13 +96,7 @@ export class EmailService implements OnModuleDestroy {
             messagePromises.push(p);
           });
 
-          f.once('error', (err: any) => {
-            connection.end();
-            reject(err);
-          });
-
           f.once('end', async () => {
-            connection.end();
             const results = await Promise.all(messagePromises);
             resolve(results.sort((a, b) => b.uid - a.uid));
           });
@@ -107,7 +106,6 @@ export class EmailService implements OnModuleDestroy {
   }
 
   async connectListener(folder: string = 'INBOX'): Promise<ImapInstance> {
-    // If we already have a listener for this specific folder, return it
     if (this.listenerConnection.has(folder)) {
       return this.listenerConnection.get(folder);
     }

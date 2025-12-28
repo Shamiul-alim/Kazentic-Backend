@@ -25,12 +25,9 @@ export class EmailController {
         message: 'Invalid folder name',
       };
     }
-    const lastFetchedEmailIdNumber = lastFetchedEmailId
-      ? parseInt(lastFetchedEmailId, 10)
-      : 0;
 
     try {
-      const emails = await this.emailService.getEmails(imapFolder, 10, lastFetchedEmailIdNumber);
+      const emails = await this.emailService.getEmails(imapFolder, 10,);
       return { success: true, emails };
     } catch (error) {
       return {
