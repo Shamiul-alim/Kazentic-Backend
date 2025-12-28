@@ -9,92 +9,80 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     @WebSocketServer()
     server!: Server;
 
+    private lastUids: Record<string, number> = {};
+    private readonly folderMap: Record<string, string> = {
+        inbox: 'INBOX',
+        sent: '[Gmail]/Sent Mail',
+        all: '[Gmail]/All Mail',
+        spam: '[Gmail]/Spam',
+        trash: '[Gmail]/Trash',
+        drafts: '[Gmail]/Drafts',
+        starred: '[Gmail]/Starred',
+    };
+
+
     constructor(private readonly emailService: EmailService) { }
 
 
-    private lastInboxId: number = 0;
-    private lastSentId: number = 0;
 
     async onModuleInit() {
-        await this.initializeLastIds();
-        await this.setupInboxListener();
-        await this.setupSentListener();
+        console.log('Initializing Real-time Listeners for all folders...');
+
+        // Initialize listeners for every folder in the map
+        for (const [roomName, imapFolder] of Object.entries(this.folderMap)) {
+            try {
+                // 1. Get initial UID for this folder
+                const initial = await this.emailService.getEmails(imapFolder, 1);
+                this.lastUids[roomName] = initial.length > 0 ? initial[0].uid : 0;
+
+                // 2. Setup long-lived listener
+                const conn = await this.emailService.connectListener(imapFolder);
+
+                // 3. Attach events
+                const checkUpdate = () => this.checkForUpdates(roomName, imapFolder);
+                conn.on('mail', checkUpdate);
+                conn.on('update', checkUpdate);
+
+                console.log(`✓ Listener ready for: ${roomName}`);
+            } catch (err) {
+                console.error(`Error setting up ${roomName}:`, err);
+            }
+        }
+    }
+    private async checkForUpdates(roomName: string, imapFolder: string) {
+        try {
+            const latest = await this.emailService.getEmails(imapFolder, 5);
+            const currentLastId = this.lastUids[roomName] || 0;
+            const newEmails = latest.filter(e => e.uid > currentLastId);
+
+            if (newEmails.length > 0) {
+                this.lastUids[roomName] = Math.max(...newEmails.map(e => e.uid));
+                console.log(`New emails detected in ${roomName}. Notifying clients...`);
+                // Send only to the specific room (e.g. 'all', 'inbox', 'sent')
+                this.server.to(roomName).emit('new_emails', newEmails);
+            }
+        } catch (error) {
+            console.error(`Check update failed for ${roomName}:`, error);
+        }
     }
 
-    private async setupInboxListener() {
-        const conn = await this.emailService.connectListener('INBOX');
-        conn.on('mail', () => this.checkNewInbox());
-        conn.on('update', () => this.checkNewInbox());
-    }
-
-    private async setupSentListener() {
-        const conn = await this.emailService.connectListener('[Gmail]/Sent Mail');
-        conn.on('mail', () => this.checkNewSent());
-        conn.on('update', () => this.checkNewSent());
-    }
-
-    private async initializeLastIds() {
-        const inbox = await this.emailService.getEmails('INBOX', 1);
-        if (inbox.length > 0) this.lastInboxId = inbox[0].uid;
-
-        const sent = await this.emailService.getEmails('[Gmail]/Sent Mail', 1);
-        if (sent.length > 0) this.lastSentId = sent[0].uid;
-
-        console.log(`Initialized IDs - Inbox: ${this.lastInboxId}, Sent: ${this.lastSentId}`);
-    }
 
     @SubscribeMessage('join_folder')
     handleJoinFolder(client: Socket, folder: string) {
-        client.rooms.forEach(room => { if (room !== client.id) client.leave(room); });
-        client.join(folder);
-        console.log(`Client ${client.id} joined room: ${folder}`);
+        const room = folder.toLowerCase();
+        // Leave other folder rooms, but stay in the personal client.id room
+        client.rooms.forEach(r => { if (r !== client.id) client.leave(r); });
+
+        if (this.folderMap[room]) {
+            client.join(room);
+            console.log(`Client ${client.id} switched to room: ${room}`);
+        }
     }
+
     async handleConnection(client: Socket) {
-
-        const inbox = await this.emailService.getEmails('INBOX', 1);
-        if (inbox.length > 0) this.lastInboxId = Math.max(this.lastInboxId, inbox[0].uid);
-
-        const sent = await this.emailService.getEmails('[Gmail]/Sent Mail', 1);
-        if (sent.length > 0) this.lastSentId = Math.max(this.lastSentId, sent[0].uid);
+        console.log(`Socket connected: ${client.id}`);
     }
 
     async handleDisconnect(client: Socket) { }
 
-
-    async listenForUpdates() {
-        const connection = await this.emailService.connectListener();
-
-        connection.on('mail', async () => {
-            await this.checkNewInbox();
-        });
-        connection.on('update', async () => {
-            await this.checkNewInbox();
-            await this.checkNewSent();
-        });
-    }
-    private async checkNewInbox() {
-        const latest = await this.emailService.getEmails('INBOX', 5);
-        const newEmails = latest.filter(e => e.uid > this.lastInboxId);
-
-        if (newEmails.length > 0) {
-            this.lastInboxId = Math.max(...newEmails.map(e => e.uid));
-            console.log(`New Inbox mail found. ID: ${this.lastInboxId}`);
-            this.server.to('inbox').emit('new_emails', newEmails);
-        }
-    }
-
-    private async checkNewSent() {
-        try {
-            const latestSent = await this.emailService.getEmails('[Gmail]/Sent Mail', 5);
-            const newSent = latestSent.filter(e => e.uid > this.lastSentId);
-
-            if (newSent.length > 0) {
-                this.lastSentId = Math.max(...newSent.map(e => e.uid));
-                console.log(`New Sent mail found. ID: ${this.lastSentId}`);
-                this.server.to('sent').emit('new_emails', newSent);
-            }
-        } catch (error) {
-            console.error("Error checking new sent emails:", error);
-        }
-    }
 }
