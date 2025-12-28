@@ -1,7 +1,9 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { EmailService } from './email.service';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('emails')
+@UseGuards(AuthGuard('jwt'))
 export class EmailController {
   constructor(private readonly emailService: EmailService) { }
 
