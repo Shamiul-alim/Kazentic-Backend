@@ -16,15 +16,14 @@ export class EmailService implements OnModuleDestroy {
     tlsOptions: { rejectUnauthorized: false },
     authTimeout: 10000,
   };
-
-  private listenerConnection: ImapInstance | null = null;
+  private listenerConnection: Map<string, ImapInstance> = new Map();
 
   onModuleDestroy() {
-    if (this.listenerConnection) this.listenerConnection.end();
+    // Close all active listener connections
+    this.listenerConnection.forEach((conn) => conn.end());
+    this.listenerConnection.clear();
   }
-
   async connectFetcher(): Promise<ImapInstance> {
-
     const conn = new Imap(this.imapConfig);
     return new Promise((resolve, reject) => {
       conn.once('ready', () => resolve(conn));
@@ -43,13 +42,11 @@ export class EmailService implements OnModuleDestroy {
           return reject(err);
         }
 
-
         connection.search(['ALL'], (err: any, uids: number[]) => {
           if (err) {
             connection.end();
             return reject(err);
           }
-
 
           const targetUids = uids.sort((a, b) => b - a).slice(0, limit);
 
@@ -59,7 +56,6 @@ export class EmailService implements OnModuleDestroy {
           }
 
           const messagePromises: Promise<any>[] = [];
-
           const f = connection.fetch(targetUids, { bodies: '' });
 
           f.on('message', (msg: any) => {
@@ -75,7 +71,7 @@ export class EmailService implements OnModuleDestroy {
                     subject: fullParsed.subject ?? '(No Subject)',
                     date: fullParsed.date,
                     textSnippet: fullParsed.text?.substring(0, 200) ?? '',
-                    isDraft: folder.includes('Drafts'),
+                    isDraft: folder.toLowerCase().includes('drafts'),
                   });
                 }
               };
@@ -103,7 +99,6 @@ export class EmailService implements OnModuleDestroy {
           f.once('end', async () => {
             connection.end();
             const results = await Promise.all(messagePromises);
-
             resolve(results.sort((a, b) => b.uid - a.uid));
           });
         });
@@ -111,21 +106,39 @@ export class EmailService implements OnModuleDestroy {
     });
   }
 
-  async connectListener(): Promise<ImapInstance> {
-    if (!this.listenerConnection) {
-      this.listenerConnection = new Imap(this.imapConfig);
-      return new Promise((resolve, reject) => {
-        this.listenerConnection!.once('ready', () => {
-          this.listenerConnection!.openBox('INBOX', false, (err: any) => {
-            if (err) return reject(err);
-            console.log('IMAP listener ready and watching INBOX');
-            resolve(this.listenerConnection!);
-          });
-        });
-        this.listenerConnection!.once('error', (err: any) => reject(err));
-        this.listenerConnection!.connect();
-      });
+  async connectListener(folder: string = 'INBOX'): Promise<ImapInstance> {
+    // If we already have a listener for this specific folder, return it
+    if (this.listenerConnection.has(folder)) {
+      return this.listenerConnection.get(folder);
     }
-    return this.listenerConnection;
+
+    const conn = new Imap(this.imapConfig);
+
+    return new Promise((resolve, reject) => {
+      conn.once('ready', () => {
+        conn.openBox(folder, false, (err: any) => {
+          if (err) {
+            conn.end();
+            return reject(err);
+          }
+          console.log(`IMAP listener watching folder: ${folder}`);
+          this.listenerConnection.set(folder, conn);
+          resolve(conn);
+        });
+      });
+
+      conn.once('error', (err: any) => {
+        console.error(`IMAP listener error for ${folder}:`, err);
+        this.listenerConnection.delete(folder);
+        reject(err);
+      });
+
+      conn.once('end', () => {
+        console.warn(`IMAP listener connection closed for ${folder}`);
+        this.listenerConnection.delete(folder);
+      });
+
+      conn.connect();
+    });
   }
 }

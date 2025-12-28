@@ -10,48 +10,91 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     server!: Server;
 
     constructor(private readonly emailService: EmailService) { }
-    private lastFetchedEmailId: number = 0;
+
+
+    private lastInboxId: number = 0;
+    private lastSentId: number = 0;
 
     async onModuleInit() {
-        console.log('Starting IMAP mail listener...');
-        await this.listenForNewEmails();
+        await this.initializeLastIds();
+        await this.setupInboxListener();
+        await this.setupSentListener();
     }
 
-    private updateLastId(emails: any[]) {
-        if (emails.length > 0) {
-            const maxUid = Math.max(...emails.map(e => e.uid));
-            if (maxUid > this.lastFetchedEmailId) {
-                this.lastFetchedEmailId = maxUid;
-            }
-        }
+    private async setupInboxListener() {
+        const conn = await this.emailService.connectListener('INBOX');
+        conn.on('mail', () => this.checkNewInbox());
+        conn.on('update', () => this.checkNewInbox());
+    }
+
+    private async setupSentListener() {
+        const conn = await this.emailService.connectListener('[Gmail]/Sent Mail');
+        conn.on('mail', () => this.checkNewSent());
+        conn.on('update', () => this.checkNewSent());
+    }
+
+    private async initializeLastIds() {
+        const inbox = await this.emailService.getEmails('INBOX', 1);
+        if (inbox.length > 0) this.lastInboxId = inbox[0].uid;
+
+        const sent = await this.emailService.getEmails('[Gmail]/Sent Mail', 1);
+        if (sent.length > 0) this.lastSentId = sent[0].uid;
+
+        console.log(`Initialized IDs - Inbox: ${this.lastInboxId}, Sent: ${this.lastSentId}`);
+    }
+
+    @SubscribeMessage('join_folder')
+    handleJoinFolder(client: Socket, folder: string) {
+        client.rooms.forEach(room => { if (room !== client.id) client.leave(room); });
+        client.join(folder);
+        console.log(`Client ${client.id} joined room: ${folder}`);
     }
     async handleConnection(client: Socket) {
-        console.log('Client connected: ' + client.id);
-        const emails = await this.emailService.getEmails('INBOX', 10);
-        this.updateLastId(emails);
-        client.emit('emails', emails);
+
+        const inbox = await this.emailService.getEmails('INBOX', 1);
+        if (inbox.length > 0) this.lastInboxId = Math.max(this.lastInboxId, inbox[0].uid);
+
+        const sent = await this.emailService.getEmails('[Gmail]/Sent Mail', 1);
+        if (sent.length > 0) this.lastSentId = Math.max(this.lastSentId, sent[0].uid);
     }
 
-    async handleDisconnect(client: Socket) {
-        console.log('Client disconnected: ' + client.id);
-    }
+    async handleDisconnect(client: Socket) { }
 
 
-    async listenForNewEmails() {
+    async listenForUpdates() {
         const connection = await this.emailService.connectListener();
 
-        connection.on('mail', async (numNewMsgs: number) => {
-            console.log(`IMAP EVENT: ${numNewMsgs} new messages detected.`);
-
-            const latestEmails = await this.emailService.getEmails('INBOX', 5);
-
-            const newEmails = latestEmails.filter(e => e.uid > this.lastFetchedEmailId);
-
-            if (newEmails.length > 0) {
-                this.updateLastId(newEmails);
-                console.log(`SOCKET: Broadcasting ${newEmails.length} new emails to frontend`);
-                this.server.emit('new_emails', newEmails);
-            }
+        connection.on('mail', async () => {
+            await this.checkNewInbox();
         });
+        connection.on('update', async () => {
+            await this.checkNewInbox();
+            await this.checkNewSent();
+        });
+    }
+    private async checkNewInbox() {
+        const latest = await this.emailService.getEmails('INBOX', 5);
+        const newEmails = latest.filter(e => e.uid > this.lastInboxId);
+
+        if (newEmails.length > 0) {
+            this.lastInboxId = Math.max(...newEmails.map(e => e.uid));
+            console.log(`New Inbox mail found. ID: ${this.lastInboxId}`);
+            this.server.to('inbox').emit('new_emails', newEmails);
+        }
+    }
+
+    private async checkNewSent() {
+        try {
+            const latestSent = await this.emailService.getEmails('[Gmail]/Sent Mail', 5);
+            const newSent = latestSent.filter(e => e.uid > this.lastSentId);
+
+            if (newSent.length > 0) {
+                this.lastSentId = Math.max(...newSent.map(e => e.uid));
+                console.log(`New Sent mail found. ID: ${this.lastSentId}`);
+                this.server.to('sent').emit('new_emails', newSent);
+            }
+        } catch (error) {
+            console.error("Error checking new sent emails:", error);
+        }
     }
 }
